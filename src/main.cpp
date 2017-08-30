@@ -10,8 +10,10 @@
 #include <iostream>
 #include <vector>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <cmath>
+#include <cfloat>
 
 extern "C" {
 #include "gurobi_c.h"
@@ -49,9 +51,12 @@ int main(int argc, char* args[]){
 		}
 		edges = in_graph.get_edges();
   }
+  int option = 0;
+  if(argc >= 6) // Lagrangian Relaxation option (constraints) {2, 3}
+    option = string_to< int >(args[5]);
 
 #if LOGS == true
-	in_graph.show_data();
+	// in_graph.show_data();
 #endif
 
 	// Gurobi variables
@@ -91,6 +96,7 @@ int main(int argc, char* args[]){
 			sprintf(varnames[counter], "x_%d_%d", v, j);
 			++counter;
 		} // counter = n * R
+  if(error) error_quit(&env, &model);
 
 	// y_{uvj} variables
 	for(int e = 0; e < m; e++)
@@ -121,26 +127,28 @@ int main(int argc, char* args[]){
 	char name[100];
 
 	// Constraints (2)
-	for(int v = 0; v < n; v++) {
-		for(int j = 0; j < R; j++) {
-			ind[j] = v * R + j;
-			val[j] = 1.0;
-		}
-		sprintf(name, "cons2_%d", v);
-		error = GRBaddconstr(model, R, ind, val, '=', k, name);
-    if (error) error_quit(&env, &model);
-	}
+  if(option != 2) // Checking whether it is a Lagrangian model
+  	for(int v = 0; v < n; v++) {
+  		for(int j = 0; j < R; j++) {
+  			ind[j] = v * R + j;
+  			val[j] = 1.0;
+  		}
+  		sprintf(name, "cons2_%d", v);
+  		error = GRBaddconstr(model, R, ind, val, '=', k, name);
+      if (error) error_quit(&env, &model);
+  	}
 
 	// Constraints (3)
-	for(int e = 0; e < m; e++) {
-		for(int j = 0; j < R; j++) {
-			ind[j] = (n * R) + e * R + j;
-			val[j] = 1.0;
-		}
-		sprintf(name, "cons3_%d", e);
-		error = GRBaddconstr(model, R, ind, val, '<', c, name);
-    if (error) error_quit(&env, &model);
-	}
+  if(option != 3) // Checking whether it is a Lagrangian model
+  	for(int e = 0; e < m; e++) {
+  		for(int j = 0; j < R; j++) {
+  			ind[j] = (n * R) + e * R + j;
+  			val[j] = 1.0;
+  		}
+  		sprintf(name, "cons3_%d", e);
+  		error = GRBaddconstr(model, R, ind, val, '<', c, name);
+      if (error) error_quit(&env, &model);
+  	}
 
 	// Constraints (4)
 	for(int e = 0; e < m; e++) {
@@ -195,65 +203,229 @@ int main(int argc, char* args[]){
 	GRBsetdblparam(GRBgetenv(model), GRB_DBL_PAR_HEURISTICS, 0);
 	GRBsetdblparam(GRBgetenv(model), GRB_DBL_PAR_TIMELIMIT, 3600.0);
 
-	// Callback settings
-	c_data mydata;
-  mydata.numvars  = numvars;
-  mydata.cuts_applied  = 0;
-  mydata.flag     = true;
-  mydata.solution = (double*) malloc(numvars * sizeof(double));
-  mydata.in_graph = &in_graph;
-  mydata.logfile  = fopen("cb.log", "w+");
-  mydata.timer    = &timer;
-	error = GRBsetcallbackfunc(model, mycallback, (void *) &mydata);
-  if (error) error_quit(&env, &model);
+  if(!option) { // i.e. Branch-and-Cut
+  	// Callback settings
+  	c_data mydata;
+    mydata.numvars  = numvars;
+    mydata.cuts_applied  = 0;
+    mydata.flag     = true;
+    mydata.solution = (double*) malloc(numvars * sizeof(double));
+    mydata.in_graph = &in_graph;
+    mydata.logfile  = fopen("cb.log", "w+");
+    mydata.timer    = &timer;
+  	error = GRBsetcallbackfunc(model, mycallback, (void *) &mydata);
+    if (error) error_quit(&env, &model);
 
-	// Solving the model
+  	// Solving the model
 #if LOGS == true
-  GRBwrite(model, "test.lp");
+    GRBwrite(model, "test.lp");
 #endif
-	error = GRBoptimize(model);
-	if (error) error_quit(&env, &model);
-  timer.stop();
+  	error = GRBoptimize(model);
+  	if (error) error_quit(&env, &model);
+    timer.stop();
 
-	// Obtaining post-optimization information
-	int optimstatus, num_sols;
-  double objval, num_nodes;
-	error = GRBgetintattr(model, GRB_INT_ATTR_STATUS, &optimstatus);
-  if (error) error_quit(&env, &model);
-  error = GRBgetintattr(model, GRB_INT_ATTR_SOLCOUNT, &num_sols);
-  if (error) error_quit(&env, &model);
-  error = GRBgetdblattr(model, GRB_DBL_ATTR_NODECOUNT, &num_nodes);
-  if (error) error_quit(&env, &model);
-  error = GRBgetdblattr(model, GRB_DBL_ATTR_OBJVAL, &objval);
-  if (error) error_quit(&env, &model);
+  	// Obtaining post-optimization information
+  	int optimstatus, num_sols;
+    double objval, num_nodes, gap;
+  	error = GRBgetintattr(model, GRB_INT_ATTR_STATUS, &optimstatus);
+    if (error) error_quit(&env, &model);
+    error = GRBgetintattr(model, GRB_INT_ATTR_SOLCOUNT, &num_sols);
+    if (error) error_quit(&env, &model);
+    error = GRBgetdblattr(model, GRB_DBL_ATTR_NODECOUNT, &num_nodes);
+    if (error) error_quit(&env, &model);
+    error = GRBgetdblattr(model, GRB_DBL_ATTR_OBJVAL, &objval);
+    if (error) error_quit(&env, &model);
+    error = GRBgetdblattr(model, GRB_DBL_ATTR_MIPGAP, &gap);
+    if (error) error_quit(&env, &model);
 
 #if LOGS == true
-	printf("\nOptimization complete\n");
-  if (optimstatus == GRB_OPTIMAL) {
-    printf("Optimal objective: %.2lf (%.2lf)\n", objval, timer.getStopTime());
-    printf("Linear Relaxation: %.2lf\n", mydata.linear_rel);
-    printf("Linear Relaxation (after cuts): %.2lf (%.2lf)\n", mydata.cut_rel, mydata.linear_time);
-    printf("# of cuts applied: %d\n", mydata.cuts_applied);
-  } else if (optimstatus == GRB_INF_OR_UNBD) {
-    printf("Model is infeasible or unbounded\n");
-  } else {
-    printf("Optimization was stopped early\n");
-  }
+  	printf("\nOptimization complete\n");
+    if (optimstatus == GRB_OPTIMAL) {
+      printf("Optimal objective: %.2lf (%.2lf)\n", objval, timer.getStopTime());
+      printf("Linear Relaxation: %.2lf\n", mydata.linear_rel);
+      printf("Linear Relaxation (after cuts): %.2lf (%.2lf)\n", mydata.cut_rel, mydata.linear_time);
+      printf("# of cuts applied: %d\n", mydata.cuts_applied);
+    } else if (optimstatus == GRB_INF_OR_UNBD) {
+      printf("Model is infeasible or unbounded\n");
+    } else {
+      printf("Optimization was stopped early\n");
+    }
 #endif
 
-  if (optimstatus == GRB_OPTIMAL || optimstatus == GRB_SUBOPTIMAL) {
+    if (optimstatus == GRB_OPTIMAL || optimstatus == GRB_SUBOPTIMAL) {
+      ofstream _file;
+      _file.open("results.csv", ios::app);
+      if(_file.is_open()){
+        _file.precision(3);
+        _file << fixed << objval << "," << gap << "," << timer.getStopTime() << "," << mydata.linear_rel << "," << mydata.cut_rel << ", ," << mydata.linear_time << "," << num_sols << "," << num_nodes << "," << mydata.cuts_applied << endl;
+        _file.close();
+      }
+    }
+    fclose(mydata.logfile);
+  } else { // Lagrangian Relaxation
+    // Initializing Lagrangian parameters
+    double sub_step = 2.0;
+    double step_limit = 0.05;
+    unsigned it_count = 2; // i.e. two iterations without improvement
+    double best_dual = -MAX_DOUBLE;
+    double primal_bound = string_to< double >(args[6]); // Primal bound given
+
+    // Lagrangian multipliers
+    double* alpha_multipliers = new double[m];
+    double* beta_multipliers = new double[n];
+
+    // Initializing Lagrangian multipliers with value 0.0
+    memset(alpha_multipliers, 0, sizeof(double) * m);
+    memset(beta_multipliers, 0, sizeof(double) * n);
+
+    double current_dual;
+    unsigned count = 0, it = 0;
+    double* subgradients = new double[numvars];
+    double* current_vals = new double[numvars];
+    double* best_vals = new double[numvars];
+    do {
+      // Solving current relaxed model
+#if LOGS == true
+      GRBwrite(model, "test.lp");
+#endif
+      GRBsetintparam(GRBgetenv(model), GRB_INT_PAR_OUTPUTFLAG, 0);
+      error = GRBoptimize(model);
+    	if (error) error_quit(&env, &model);
+
+  		// Retrieving variables & obj function value from the relaxed problem
+      GRBgetdblattrarray(model, GRB_DBL_ATTR_X, 0, numvars, current_vals);
+      GRBgetdblattr(model, GRB_DBL_ATTR_OBJVAL, &current_dual);
+
+#if LOGS == true
+      printf("----------------------------------\n");
+      printf("Subgradient agility: %.2lf\n", sub_step);
+      printf("Current dual value: %.2lf\n", current_dual);
+      printf("Best dual value: %.2lf\n", best_dual);
+#endif
+
+  		if(option == 2){ // Lagrangian Subgradient method for Consts (2) relaxed
+#if LOGS == true
+        printf("Beta Multiplier: ");
+        for(int i = 0; i < n; i++)
+          printf("%.2lf ", beta_multipliers[i]);
+        printf("\n");
+#endif
+        // Calculating subgradients
+        for(int v = 0; v < n; v++) {
+          subgradients[v] = k;
+          for(int j = 0; j < R; j++)
+            subgradients[v] -= current_vals[v * R + j];
+        }
+  			// Calculating stepsize
+      	double aux = 0.0;
+      	for(int v = 0; v < n; v++)
+      		aux += subgradients[v] * subgradients[v];
+        if(!aux) {
+          best_dual = current_dual;
+          best_vals = current_vals;
+          break;
+        }
+      	double step_size = ( sub_step * (primal_bound - current_dual) ) / aux;
+#if LOGS == true
+        printf("Subgradients: ");
+        for(int v = 0; v < n; v++)
+          printf("%.2lf ", subgradients[v]);
+        printf("\nStep size: %.2lf\n", step_size);
+#endif
+
+  			// Updating Lagrangian multipliers
+  			for(int v = 0; v < n; v++)
+  				beta_multipliers[v] = beta_multipliers[v] - ( step_size * subgradients[v] );
+
+  		} else if(option == 3) { // Lagrangian Subgradient method for Consts (3) relaxed
+#if LOGS == true
+        printf("Alpha Multiplier: ");
+        for(int uv = 0; uv < m; uv++)
+          printf("%.2lf ", alpha_multipliers[uv]);
+        printf("\n");
+#endif
+        // Calculating subgradients
+        for(int uv = 0; uv < m; uv++) {
+          subgradients[uv] = c;
+          for(int j = 0; j < R; j++)
+            subgradients[uv] -= current_vals[(n * R) + uv * R + j];
+        }
+        // Calculating stepsize
+        double aux = 0.0;
+        for(int uv = 0; uv < m; uv++)
+          aux += subgradients[uv] * subgradients[uv];
+        if(!aux) {
+          best_dual = current_dual;
+          best_vals = current_vals;
+          break;
+        }
+        double step_size = ( sub_step * (primal_bound - current_dual) ) / aux;
+#if LOGS == true
+        printf("Subgradients: ");
+        for(int uv = 0; uv < m; uv++)
+          printf("%.2lf ", subgradients[uv]);
+        printf("\nStep size: %.2lf\n", step_size);
+#endif
+
+        // Updating Lagrangian multipliers
+        for(int uv = 0; uv < m; uv++) {
+          double aux = alpha_multipliers[uv] - ( step_size * subgradients[uv] );
+          alpha_multipliers[uv] = (aux > 0.0) ? aux : 0;
+        }
+  		}
+
+  		// Saving the best bound
+  		if(current_dual > best_dual){
+  			best_dual = current_dual;
+  			best_vals = current_vals;
+  			count = 0;
+  		} else count++;
+
+  		// Checking the improvement
+  		if(count == it_count){
+  			sub_step /= 2.0;
+  			count = 0;
+  		}
+
+      // Updating the objective function with new multipliers
+      if(option == 2) {
+        double dual_const = 0.0;
+        for(int v = 0; v < n; v++)
+          for(int j = 0; j < R; j++)
+            val[v * R + j] = beta_multipliers[v];
+        for(int v = 0; v < n; v++)
+          dual_const -= k * beta_multipliers[v];
+        error = GRBsetdblattr(model, GRB_DBL_ATTR_OBJCON, dual_const);
+        error = GRBsetdblattrarray(model, GRB_DBL_ATTR_OBJ, 0, n * R, val);
+        if (error) error_quit(&env, &model);
+      } else if (option == 3) {
+        double dual_const = 0.0;
+        int counter = 0;
+        for(int uv = 0; uv < m; uv++)
+          for(int j = 0; j < R; j++)
+            val[counter++] = alpha_multipliers[uv];
+        for(int uv = 0; uv < m; uv++)
+          dual_const -= c * alpha_multipliers[uv];
+        error = GRBsetdblattr(model, GRB_DBL_ATTR_OBJCON, dual_const);
+        error = GRBsetdblattrarray(model, GRB_DBL_ATTR_OBJ, n * R, m * R, val);
+        if (error) error_quit(&env, &model);
+      }
+      it++;
+  	} while( (current_dual < primal_bound) && (sub_step > step_limit) );
+    timer.stop();
+
+    // Saving results to file
     ofstream _file;
     _file.open("results.csv", ios::app);
     if(_file.is_open()){
       _file.precision(3);
-      _file << fixed << objval << "," << timer.getStopTime() << "," << mydata.linear_rel << "," << mydata.cut_rel << "," << mydata.linear_time << "," << num_sols << "," << num_nodes << "," << mydata.cuts_applied << endl;
+      _file << fixed << primal_bound << "," << best_dual << ", ," << timer.getStopTime() << "," << it << "," << sub_step << endl;
       _file.close();
     }
   }
 
 	GRBfreemodel(model);
   GRBfreeenv(env);
-  fclose(mydata.logfile);
 
 	return 0;
 }
