@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <cmath>
+
 extern "C" {
 #include "gurobi_c.h"
 }
@@ -21,26 +22,19 @@ extern "C" {
 #include "../include/typedef.hpp"
 #include "../include/FWChrono.h"
 
-#define LOGS true
-
 using namespace std;
 
 void error_quit(GRBenv**, GRBmodel**);
-
-struct callback_data {
-  double  lastiter;
-  double  lastnode;
-  double *solution;
-  FILE   *logfile;
-};
-
-int __stdcall mycallback(GRBmodel*, void*, int, void*);
 
 int main(int argc, char* args[]){
 	instance in_graph;
   int n, m, k, c, R;
 	vector< edge > edges;
 
+  FWChrono timer;
+  timer.start();
+
+  // Reading instance data from command line argument
   if(argc >= 2) {
   	in_graph.read_from_file(args[1]);
   	n = in_graph.get_n();
@@ -56,21 +50,24 @@ int main(int argc, char* args[]){
 		edges = in_graph.get_edges();
   }
 
+#if LOGS == true
 	in_graph.show_data();
+#endif
 
 	// Gurobi variables
 	GRBenv* env = NULL;
 	GRBmodel* model = NULL;
 	int error = 0;
-	int* ind = new int[(n * R) + (m * R) + R];
-	double* val = new double[(n * R) + (m * R) + R];
-	double* obj = new double[(n * R) + (m * R) + R];
-	double* lb = new double[(n * R) + (m * R) + R];
-	double* ub = new double[(n * R) + (m * R) + R];
-	char* vtype = new char[(n * R) + (m * R) + R];
-	char** varnames = new char*[(n * R) + (m * R) + R];
+  unsigned numvars = (n * R) + (m * R) + R;
+	int* ind = new int[numvars];
+	double* val = new double[numvars];
+	double* obj = new double[numvars];
+	double* lb = new double[numvars];
+	double* ub = new double[numvars];
+	char* vtype = new char[numvars];
+	char** varnames = new char*[numvars];
 
-	for(int i = 0; i < ((n * R) + (m * R) + R); i++)
+	for(int i = 0; i < numvars; i++)
 		varnames[i] = new char[100];
 
 	char pname[100];
@@ -78,7 +75,7 @@ int main(int argc, char* args[]){
 
 	// Creating environment
 	// error = GRBloadenv(&env, pname);
-	error = GRBloadenv(&env, NULL);
+	error = GRBloadenv(&env, "");
 	if(error) error_quit(&env, &model);
 
 	// Adding variables information in aux vectors
@@ -130,7 +127,7 @@ int main(int argc, char* args[]){
 			val[j] = 1.0;
 		}
 		sprintf(name, "cons2_%d", v);
-		error = GRBaddconstr(model, R, ind, val, GRB_EQUAL, k, name);
+		error = GRBaddconstr(model, R, ind, val, '=', k, name);
     if (error) error_quit(&env, &model);
 	}
 
@@ -141,7 +138,7 @@ int main(int argc, char* args[]){
 			val[j] = 1.0;
 		}
 		sprintf(name, "cons3_%d", e);
-		error = GRBaddconstr(model, R, ind, val, GRB_LESS_EQUAL, c, name);
+		error = GRBaddconstr(model, R, ind, val, '<', c, name);
     if (error) error_quit(&env, &model);
 	}
 
@@ -154,7 +151,7 @@ int main(int argc, char* args[]){
 			ind[2] = (n * R) + e * R + j;
 			val[2] = -1.0;
 			sprintf(name, "cons4_%d_%d", e, j);
-			error = GRBaddconstr(model, 3, ind, val, GRB_LESS_EQUAL, 1, name);
+			error = GRBaddconstr(model, 3, ind, val, '<', 1, name);
 	    if (error) error_quit(&env, &model);
 		}
 	}
@@ -167,7 +164,7 @@ int main(int argc, char* args[]){
 			ind[1] = (n * R) + (m * R) + j;
 			val[1] = -1.0;
 			sprintf(name, "cons5_%d_%d", v, j);
-			error = GRBaddconstr(model, 2, ind, val, GRB_LESS_EQUAL, 0, name);
+			error = GRBaddconstr(model, 2, ind, val, '<', 0, name);
 	    if (error) error_quit(&env, &model);
 		}
 	}
@@ -179,53 +176,84 @@ int main(int argc, char* args[]){
 		ind[1] = (n * R) + (m * R) + j + 1;
 		val[1] = -1.0;
 		sprintf(name, "cons6_%d", j);
-		error = GRBaddconstr(model, 2, ind, val, GRB_LESS_EQUAL, 0, name);
+		error = GRBaddconstr(model, 2, ind, val, '>', 0, name);
     if (error) error_quit(&env, &model);
 	}
 
 	// Model solution and configuration of attrs
 	GRBsetintattr(model, GRB_INT_ATTR_MODELSENSE, GRB_MINIMIZE);
 
-	error = GRBsetintparam(env, GRB_INT_PAR_THREADS, 1);
-	if (error) error_quit(&env, &model);
-	GRBsetintparam(env, GRB_INT_PAR_AGGREGATE, 0);
-	GRBsetintparam(env, GRB_INT_PAR_PRESOLVE, 0);
-	GRBsetintparam(env, GRB_INT_PAR_CUTS, 0);
-	GRBsetdblparam(env, GRB_DBL_PAR_HEURISTICS, 0);
-	GRBsetdblparam(env, GRB_DBL_PAR_TIMELIMIT, 3600.0);
+#if LOGS != true
+	GRBsetintparam(GRBgetenv(model), GRB_INT_PAR_OUTPUTFLAG, 0);
+#endif
+
+	GRBsetintparam(GRBgetenv(model), GRB_INT_PAR_THREADS, 1);
+	GRBsetintparam(GRBgetenv(model), GRB_INT_PAR_AGGREGATE, 0);
+	GRBsetintparam(GRBgetenv(model), GRB_INT_PAR_PRESOLVE, 0);
+  GRBsetintparam(GRBgetenv(model), GRB_INT_PAR_PRECRUSH, 1);
+	GRBsetintparam(GRBgetenv(model), GRB_INT_PAR_CUTS, 0);
+	GRBsetdblparam(GRBgetenv(model), GRB_DBL_PAR_HEURISTICS, 0);
+	GRBsetdblparam(GRBgetenv(model), GRB_DBL_PAR_TIMELIMIT, 3600.0);
 
 	// Callback settings
-	struct callback_data mydata;
-  mydata.lastiter = -GRB_INFINITY;
-  mydata.lastnode = -GRB_INFINITY;
-  mydata.solution = (double*) malloc(((n * R) + (m * R) + R) * sizeof(double));;
-  mydata.logfile  = fopen("cb.log", "w");
+	c_data mydata;
+  mydata.numvars  = numvars;
+  mydata.cuts_applied  = 0;
+  mydata.flag     = true;
+  mydata.solution = (double*) malloc(numvars * sizeof(double));
+  mydata.in_graph = &in_graph;
+  mydata.logfile  = fopen("cb.log", "w+");
+  mydata.timer    = &timer;
 	error = GRBsetcallbackfunc(model, mycallback, (void *) &mydata);
   if (error) error_quit(&env, &model);
 
-	GRBwrite(model, "test.lp");
+	// Solving the model
+#if LOGS == true
+  GRBwrite(model, "test.lp");
+#endif
 	error = GRBoptimize(model);
 	if (error) error_quit(&env, &model);
+  timer.stop();
 
-	int optimstatus;
+	// Obtaining post-optimization information
+	int optimstatus, num_sols;
+  double objval, num_nodes;
 	error = GRBgetintattr(model, GRB_INT_ATTR_STATUS, &optimstatus);
   if (error) error_quit(&env, &model);
-
-	double objval;
+  error = GRBgetintattr(model, GRB_INT_ATTR_SOLCOUNT, &num_sols);
+  if (error) error_quit(&env, &model);
+  error = GRBgetdblattr(model, GRB_DBL_ATTR_NODECOUNT, &num_nodes);
+  if (error) error_quit(&env, &model);
   error = GRBgetdblattr(model, GRB_DBL_ATTR_OBJVAL, &objval);
   if (error) error_quit(&env, &model);
 
+#if LOGS == true
 	printf("\nOptimization complete\n");
   if (optimstatus == GRB_OPTIMAL) {
-    printf("Optimal objective: %.4lf\n", objval);
+    printf("Optimal objective: %.2lf (%.2lf)\n", objval, timer.getStopTime());
+    printf("Linear Relaxation: %.2lf\n", mydata.linear_rel);
+    printf("Linear Relaxation (after cuts): %.2lf (%.2lf)\n", mydata.cut_rel, mydata.linear_time);
+    printf("# of cuts applied: %d\n", mydata.cuts_applied);
   } else if (optimstatus == GRB_INF_OR_UNBD) {
     printf("Model is infeasible or unbounded\n");
   } else {
     printf("Optimization was stopped early\n");
   }
+#endif
+
+  if (optimstatus == GRB_OPTIMAL || optimstatus == GRB_SUBOPTIMAL) {
+    ofstream _file;
+    _file.open("results.csv", ios::app);
+    if(_file.is_open()){
+      _file.precision(3);
+      _file << fixed << objval << "," << timer.getStopTime() << "," << mydata.linear_rel << "," << mydata.cut_rel << "," << mydata.linear_time << "," << num_sols << "," << num_nodes << "," << mydata.cuts_applied << endl;
+      _file.close();
+    }
+  }
 
 	GRBfreemodel(model);
   GRBfreeenv(env);
+  fclose(mydata.logfile);
 
 	return 0;
 }
@@ -235,62 +263,4 @@ void error_quit(GRBenv** env, GRBmodel** model) {
 	GRBfreemodel(*model);
 	GRBfreeenv(*env);
   exit(1);
-}
-
-int __stdcall mycallback(GRBmodel *model, void *cbdata, int where, void *usrdata) {
- struct callback_data *mydata = (struct callback_data *) usrdata;
-
- if (where == GRB_CB_POLLING) {
-	 /* Ignore polling callback */
- } else if (where == GRB_CB_PRESOLVE) {
-	 /* Presolve callback */
- } else if (where == GRB_CB_SIMPLEX) {
-	 /* Simplex callback */
- } else if (where == GRB_CB_MIP) {
-	 /* General MIP callback */
-	 double nodecnt, objbst, objbnd, actnodes, itcnt;
-	 int    solcnt, cutcnt;
-	 GRBcbget(cbdata, where, GRB_CB_MIP_NODCNT, &nodecnt);
-	 GRBcbget(cbdata, where, GRB_CB_MIP_OBJBST, &objbst);
-	 GRBcbget(cbdata, where, GRB_CB_MIP_OBJBND, &objbnd);
-	 GRBcbget(cbdata, where, GRB_CB_MIP_SOLCNT, &solcnt);
-	 if (nodecnt - mydata->lastnode >= 100) {
-		 mydata->lastnode = nodecnt;
-		 GRBcbget(cbdata, where, GRB_CB_MIP_NODLFT, &actnodes);
-		 GRBcbget(cbdata, where, GRB_CB_MIP_ITRCNT, &itcnt);
-		 GRBcbget(cbdata, where, GRB_CB_MIP_CUTCNT, &cutcnt);
-		 printf("%7.0f %7.0f %8.0f %13.6e %13.6e %7d %7d\n",
-						nodecnt, actnodes, itcnt, objbst, objbnd, solcnt, cutcnt);
-	 }
-	 if (fabs(objbst - objbnd) < 0.1 * (1.0 + fabs(objbst))) {
-		 printf("Stop early - 10%% gap achieved\n");
-		 GRBterminate(model);
-	 }
-	 if (nodecnt >= 10000 && solcnt) {
-		 printf("Stop early - 10000 nodes explored\n");
-		 GRBterminate(model);
-	 }
- } else if (where == GRB_CB_MIPSOL) {
-	 /* MIP solution callback */
-	 double nodecnt, obj;
-	 int    solcnt;
-	 GRBcbget(cbdata, where, GRB_CB_MIPSOL_NODCNT, &nodecnt);
-	 GRBcbget(cbdata, where, GRB_CB_MIPSOL_OBJ, &obj);
-	 GRBcbget(cbdata, where, GRB_CB_MIPSOL_SOLCNT, &solcnt);
-	 GRBcbget(cbdata, where, GRB_CB_MIPSOL_SOL, mydata->solution);
-	 printf("**** New solution at node %.0f, obj %g, sol %d, x[0] = %.2f ****\n",
-					nodecnt, obj, solcnt, mydata->solution[0]);
- } else if (where == GRB_CB_MIPNODE) {
-	 int status;
-	 /* MIP node callback */
-	 printf("**** New node ****\n");
-	 GRBcbget(cbdata, where, GRB_CB_MIPNODE_STATUS, &status);
-	 if (status == GRB_OPTIMAL) {
-		 GRBcbget(cbdata, where, GRB_CB_MIPNODE_REL, mydata->solution);
-		 GRBcbsolution(cbdata, mydata->solution, NULL);
-	 }
- } else if (where == GRB_CB_MESSAGE) {
-	 /* Message callback */
- }
- return 0;
 }

@@ -2,13 +2,11 @@
 #define TYPEDEF_HPP_
 
 #define MAX_DOUBLE 1e+75
-#define EPSILON 1e-6
+#define EPSILON 1e-5
+
+#define LOGS true
 
 #include <sstream>
-
-typedef std::vector<int>::iterator VecIntIT;
-typedef std::vector<int>::const_iterator VecIntCIT;
-typedef std::vector<int> VecInt;
 
 typedef std::pair < int, int > edge;
 
