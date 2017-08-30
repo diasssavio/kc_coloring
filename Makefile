@@ -37,7 +37,6 @@ clean:
 	/bin/rm -rf ./tmp
 	/bin/rm -rf *.lp
 	/bin/rm -rf *.log
-	/bin/rm -rf cutset.txt
 	/bin/rm -rf results.csv
 
 ########################## GENERATING OBJECT's ######################################################

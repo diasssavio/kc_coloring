@@ -31,6 +31,7 @@ using namespace std;
 
 vector< int > get_adjacency(int, vector<edge>&);
 bool is_adjacent(int, int, vector<edge>&);
+vector< int > get_edges_from_clique(vector< int >&, vector<edge>&);
 
 bool comp(pair< int, double >, pair< int, double >);
 

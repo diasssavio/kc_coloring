@@ -27,6 +27,15 @@ bool is_adjacent(int u, int v, vector<edge>& edges) {
   return false;
 }
 
+vector< int > get_edges_from_clique(vector< int >& clique, vector< edge >& edges) {
+  vector< int > to_return;
+  for(int e = 0; e < edges.size(); e++)
+    if(find(clique.begin(), clique.end(), edges[e].first) != clique.end() && find(clique.begin(), clique.end(), edges[e].second) != clique.end())
+      to_return.push_back(e);
+
+  return to_return;
+}
+
 bool comp(pair< int, double > i, pair< int, double > j) { return i.second > j.second; }
 
 int __stdcall mycallback(GRBmodel *model, void *cbdata, int where, void *usrdata) {
@@ -198,6 +207,56 @@ int __stdcall mycallback(GRBmodel *model, void *cbdata, int where, void *usrdata
               error = GRBcbcut(cbdata, ++counter, ind, val, '<', 0);
 #if LOGS == true
               // fprintf(mydata->logfile, "Violated cut\n");
+              fprintf(mydata->logfile, " <= 0\n");
+#endif
+              if(!error)
+                mydata->cuts_applied++;
+            }
+#if LOGS == true
+            else fprintf(mydata->logfile, "\n");
+#endif
+            // Checking if cuts 2.2 are violated so to be added
+            cut_value = 0.0;
+            counter = 0;
+            for(int v = 0; v < clique.size(); v++) {
+              cut_value += mydata->solution[clique[v] * R + colors[0]] * clique.size();
+              ind[counter] = clique[v] * R + colors[0];
+              val[counter] = clique.size();
+              ++counter;
+#if LOGS == true
+              fprintf(mydata->logfile, " +%.2lf x_%d_%d", val[counter], clique[v], colors[0]);
+#endif
+            }
+            vector< int > clique_edges = get_edges_from_clique(clique, edges);
+            for(int uv = 0; uv < clique_edges.size(); uv++) {
+              cut_value -= mydata->solution[(n * R) + clique_edges[uv] * R + colors[0]];
+              ind[counter] = (n * R) + clique_edges[uv] * R + colors[0];
+              val[counter] = -1.0;
+              ++counter;
+#if LOGS == true
+              fprintf(mydata->logfile, " %.2lf y_%d_%d", val[counter], clique_edges[uv], colors[0]);
+#endif
+            }
+            for(int j0 = 1; j0 < colors.size(); j0++)
+              for(int uv = 0; uv < clique_edges.size(); uv++) {
+                cut_value += mydata->solution[(n * R) + clique_edges[uv] * R + colors[j0]];
+                ind[counter] = (n * R) + clique_edges[uv] * R + colors[j0];
+                val[counter] = 1.0;
+                ++counter;
+#if LOGS == true
+                fprintf(mydata->logfile, " +%.2lf y_%d_%d", val[counter], clique_edges[uv], colors[j0]);
+#endif
+              }
+            double constant = ((c * clique.size() * (clique.size() - 1)) / 2.0) + clique.size();
+            cut_value -= constant * mydata->solution[(n * R) + (m * R) + colors[0]];
+            ind[counter] = (n * R) + (m * R) + colors[0];
+            val[counter] = -1.0 * constant;
+#if LOGS == true
+            fprintf(mydata->logfile, " %.2lf w_%d", val[counter], colors[0]);
+#endif
+            if(cut_value > EPSILON) {
+              error = GRBcbcut(cbdata, ++counter, ind, val, '<', 0);
+#if LOGS == true
               fprintf(mydata->logfile, " <= 0\n");
 #endif
               if(!error)
