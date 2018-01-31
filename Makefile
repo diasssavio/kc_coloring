@@ -53,10 +53,14 @@ $(TMP_KC)/instance.o: $(SRC)/instance.cpp $(INCLUDE)/instance.h
 $(TMP_KC)/FWChrono.o: $(SRC)/FWChrono.cpp $(INCLUDE)/FWChrono.h
 	$(CPP) -c $(CCFLAGS) $(SRC)/FWChrono.cpp -o $(TMP_KC)/FWChrono.o
 
+# STRUCTURE - RANDOM GEN
+$(TMP_KC)/mt19937ar.o: $(SRC)/mt19937ar.c $(INCLUDE)/mt19937ar.h
+	$(CPP) -c $(CCFLAGS) $(SRC)/mt19937ar.c -o $(TMP_KC)/mt19937ar.o
+
 # MAIN
 $(TMP_KC)/main.o: $(SRC)/main.cpp
 	$(CPP) -c $(CCFLAGS) $(SRC)/main.cpp -o $(TMP_KC)/main.o
 
 ########################## LINKANDO TUDO ########################################################
-$(CPP_EX): $(TMP_KC)/utils.o $(TMP_KC)/instance.o $(TMP_KC)/FWChrono.o $(TMP_KC)/main.o
-	$(CPP) $(CCFLAGS) $(TMP_KC)/utils.o $(TMP_KC)/instance.o $(TMP_KC)/FWChrono.o $(TMP_KC)/main.o -L$(TMP_STATIC) -o $(CPP_EX) $(CLIB)
+$(CPP_EX): $(TMP_KC)/utils.o $(TMP_KC)/instance.o $(TMP_KC)/FWChrono.o $(TMP_KC)/mt19937ar.o $(TMP_KC)/main.o
+	$(CPP) $(CCFLAGS) $(TMP_KC)/utils.o $(TMP_KC)/instance.o $(TMP_KC)/FWChrono.o $(TMP_KC)/mt19937ar.o $(TMP_KC)/main.o -L$(TMP_STATIC) -o $(CPP_EX) $(CLIB)
