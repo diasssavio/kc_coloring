@@ -414,6 +414,11 @@ int main(int argc, char* args[]){
   	} while( (current_dual < primal_bound) && (sub_step > step_limit) );
     timer.stop();
 
+		printf("\nOptimization complete. Primal bound: %.2lf\n", primal_bound);
+    printf("Lagrangian dual: %.2lf (%.2lf)\n", best_dual, timer.getStopTime());
+		printf("Number of iterations: %d\n", it);
+		printf("Final Subgradient Agility: %.2lf\n", sub_step);
+
     // Saving results to file
     ofstream _file;
     _file.open("results.csv", ios::app);
